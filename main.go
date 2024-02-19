@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 )
@@ -18,10 +19,10 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 
 func main() {
 	mux := http.NewServeMux()
-	mux.Handle("/", http.StripPrefix("/app", http.FileServer(http.Dir("./"))))
+	appHandler := http.StripPrefix("/app/", http.FileServer(http.Dir("./")))
 	cfg := &apiConfig{}
 
-	mux.Handle("/app/", cfg.middlewareMetricsInc(handle))
+	mux.Handle("/app/", cfg.middlewareMetricsInc(appHandler))
 
 	corsMux := middlewareCors(mux)
 
@@ -29,6 +30,19 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
+	})
+
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		cfg.fileserverHits = 0
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Counter reset"))
+	})
+
+	mux.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf("Hits: %d", cfg.fileserverHits)))
 	})
 
 	server := &http.Server{
