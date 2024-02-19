@@ -7,6 +7,7 @@ import (
 
 func main() {
 	mux := http.NewServeMux()
+	mux.Handle("/", http.StripPrefix("/app", http.FileServer(http.Dir("./"))))
 
 	corsMux := middlewareCors(mux)
 
