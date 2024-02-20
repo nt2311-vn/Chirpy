@@ -30,24 +30,29 @@ func main() {
 
 	corsMux := middlewareCors(r)
 
-	r.Get("/api/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
+	/*
 
-	r.HandleFunc("/api/reset", func(w http.ResponseWriter, r *http.Request) {
-		cfg.fileserverHits = 0
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Counter reset"))
-	})
+		r.Get("/api/healthz", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("OK"))
+		})
 
-	r.Get("/api/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf("Hits: %d", cfg.fileserverHits)))
-	})
+		r.HandleFunc("/api/reset", func(w http.ResponseWriter, r *http.Request) {
+			cfg.fileserverHits = 0
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Counter reset"))
+		})
+
+		r.Get("/api/metrics", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf("Hits: %d", cfg.fileserverHits)))
+		})
+	*/
+
+	r.Mount("/api", apiRouter(r, cfg))
 
 	server := &http.Server{
 		Addr:    ":8080",
@@ -72,4 +77,27 @@ func middlewareCors(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func apiRouter(r *chi.Mux, cfg *apiConfig) http.Handler {
+	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf("Hits: %d", cfg.fileserverHits)))
+	})
+
+	r.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
+		cfg.fileserverHits = 0
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Counter reset"))
+	})
+
+	return r
 }
