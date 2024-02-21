@@ -37,6 +37,21 @@ func main() {
 	}
 }
 
+func middlewareCors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits++
@@ -83,6 +98,7 @@ func apiRouter(r *chi.Mux, cfg *apiConfig) http.Handler {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(500)
 			w.Write(resMsg)
+			return
 		}
 
 		if len(params.Reqmsg) > 140 {
@@ -91,8 +107,9 @@ func apiRouter(r *chi.Mux, cfg *apiConfig) http.Handler {
 			}
 			resMsg, _ := json.Marshal(errormsg)
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(500)
+			w.WriteHeader(http.StatusBadRequest)
 			w.Write(resMsg)
+			return
 
 		}
 
