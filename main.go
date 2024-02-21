@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -17,26 +18,26 @@ func main() {
 	const port = "8080"
 
 	apiConfg := apiConfig{fileserverHits: 0}
-	r := chi.NewRouter()
+	router := chi.NewRouter()
 
 	fsHandler := apiConfg.middlewareMetricsInc(
 		http.StripPrefix("/app", http.FileServer(http.Dir(rootPath))),
 	)
 
-	r.Handle("/app", fsHandler)
-	r.Handle("/app/*", fsHandler)
+	router.Handle("/app", fsHandler)
+	router.Handle("/app/*", fsHandler)
 
 	apiRouter := chi.NewRouter()
 	apiRouter.Get("/healthz", handlerReadiness)
 	apiRouter.Get("/reset", apiConfg.handlerReset)
 	// apiRouter.Post("/validate_chirp", )
-	r.Mount("/api", apiRouter)
+	router.Mount("/api", apiRouter)
 
 	adminRouter := chi.NewRouter()
 	adminRouter.Get("/metrics", apiConfg.handlerMetrics)
-	r.Mount("/admin", adminRouter)
+	router.Mount("/admin", adminRouter)
 
-	corsMux := middlewareCors(r)
+	corsMux := middlewareCors(router)
 
 	server := &http.Server{
 		Addr:    ":" + port,
@@ -46,6 +47,53 @@ func main() {
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Cannot start the server: %v", err)
 	}
+}
+
+func middlewareCors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func handlerReadiness(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(http.StatusText(http.StatusOK)))
+}
+
+func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(fmt.Sprintf(`
+		<html>
+		<body>
+			<h1>Welcome, Chirpy Admin</h1>
+			<p>Chirpy has been visited %dtimes!</p>
+		</body>
+		</html>
+		`, cfg.fileserverHits)))
+}
+
+func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfg.fileserverHits++
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
+	cfg.fileserverHits = 0
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Hits reset to 0"))
 }
 
 func respondWithError(w http.ResponseWriter, statusCode int, msg string) {
@@ -70,4 +118,31 @@ func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{})
 	}
 	w.WriteHeader(statusCode)
 	w.Write(dat)
+}
+
+func handlerChirpValidate(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body string `json:"body,omitempty"`
+	}
+
+	type returnVals struct {
+		Valid bool `json:"valid,omitempty"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+
+	if err := decoder.Decode(&params); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters")
+		return
+	}
+
+	const maxChirpLength = 140
+
+	if len(params.Body) > 140 {
+		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, returnVals{Valid: true})
 }
