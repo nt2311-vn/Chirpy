@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 
@@ -14,21 +13,33 @@ type apiConfig struct {
 }
 
 func main() {
-	r := chi.NewRouter()
-	// mux := http.NewServeMux()
-	appHandler := http.StripPrefix("/app", http.FileServer(http.Dir("./")))
-	cfg := &apiConfig{}
+	const rootPath = "."
+	const port = "8080"
 
-	r.Handle("/app", cfg.middlewareMetricsInc(appHandler))
-	r.Handle("/app/*", cfg.middlewareMetricsInc(appHandler))
+	apiConfg := apiConfig{fileserverHits: 0}
+	r := chi.NewRouter()
+
+	fsHandler := apiConfg.middlewareMetricsInc(
+		http.StripPrefix("/app", http.FileServer(http.Dir(rootPath))),
+	)
+
+	r.Handle("/app", fsHandler)
+	r.Handle("/app/*", fsHandler)
+
+	apiRouter := chi.NewRouter()
+	apiRouter.Get("/healthz", handlerReadiness)
+	apiRouter.Get("/reset", apiConfg.handlerReset)
+	// apiRouter.Post("/validate_chirp", )
+	r.Mount("/api", apiRouter)
+
+	adminRouter := chi.NewRouter()
+	adminRouter.Get("/metrics", apiConfg.handlerMetrics)
+	r.Mount("/admin", adminRouter)
 
 	corsMux := middlewareCors(r)
 
-	r.Mount("/api", apiRouter(r, cfg))
-	r.Mount("/admin", adminRouter(r, cfg))
-
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":" + port,
 		Handler: corsMux,
 	}
 
@@ -37,108 +48,26 @@ func main() {
 	}
 }
 
-func middlewareCors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
+func respondWithError(w http.ResponseWriter, statusCode int, msg string) {
+	if statusCode > 499 {
+		log.Printf("Responding with 5xx error: %s", msg)
+	}
 
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+	type errorResponse struct {
+		Error string `json:"error,omitempty"`
+	}
 
-		next.ServeHTTP(w, r)
-	})
+	respondWithJSON(w, statusCode, errorResponse{Error: msg})
 }
 
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg.fileserverHits++
-		next.ServeHTTP(w, r)
-	})
-}
-
-func apiRouter(r *chi.Mux, cfg *apiConfig) http.Handler {
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
-	r.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
-		cfg.fileserverHits = 0
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Counter reset"))
-	})
-
-	r.Post("/validate_chirp", func(w http.ResponseWriter, r *http.Request) {
-		type chirpreq struct {
-			Reqmsg string `json:"body,omitempty"`
-		}
-
-		type chirpres struct {
-			Resmsg bool `json:"valid,omitempty"`
-		}
-
-		type errorres struct {
-			Errmsg string `json:"error,omitempty"`
-		}
-		decoder := json.NewDecoder(r.Body)
-		params := chirpreq{}
-
-		if err := decoder.Decode(&params); err != nil {
-			log.Printf("Error decoding json body: %v", err)
-			errormsg := errorres{
-				Errmsg: fmt.Sprintf("%v", err),
-			}
-
-			resMsg, _ := json.Marshal(errormsg)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(500)
-			w.Write(resMsg)
-			return
-		}
-
-		if len(params.Reqmsg) > 140 {
-			errormsg := errorres{
-				Errmsg: "Chirp is too long",
-			}
-			resMsg, _ := json.Marshal(errormsg)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write(resMsg)
-			return
-
-		}
-
-		okMsg := chirpres{Resmsg: true}
-		encodeMsg, _ := json.Marshal(okMsg)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(encodeMsg)
-	})
-
-	return r
-}
-
-func adminRouter(r *chi.Mux, cfg *apiConfig) http.Handler {
-	r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf(`
-		<html>
-
-		<body>
-			<h1>Welcome, Chirpy Admin</h1>
-			<p>Chirpy has been visited %d times!</p>
-		</body>
-
-		</html>
-
-		`, cfg.fileserverHits)))
-	})
-	return r
+func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	dat, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.WriteHeader(statusCode)
+	w.Write(dat)
 }
