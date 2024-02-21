@@ -150,7 +150,7 @@ func handlerChirpValidate(w http.ResponseWriter, r *http.Request) {
 
 func replaceProfane(msg string) string {
 	profaneWords := map[string]bool{"kerfuffle": true, "sharbert": true, "fornax": true}
-	words := strings.Split(msg, "")
+	words := strings.Split(msg, " ")
 
 	for index, word := range words {
 		_, isProfance := profaneWords[strings.ToLower(word)]
@@ -161,5 +161,5 @@ func replaceProfane(msg string) string {
 
 	}
 
-	return strings.Join(words, "")
+	return strings.Join(words, " ")
 }
