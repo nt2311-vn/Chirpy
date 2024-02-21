@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -30,7 +31,7 @@ func main() {
 	apiRouter := chi.NewRouter()
 	apiRouter.Get("/healthz", handlerReadiness)
 	apiRouter.Get("/reset", apiConfg.handlerReset)
-	// apiRouter.Post("/validate_chirp", )
+	apiRouter.Post("/validate_chirp", handlerChirpValidate)
 	router.Mount("/api", apiRouter)
 
 	adminRouter := chi.NewRouter()
@@ -126,7 +127,7 @@ func handlerChirpValidate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type returnVals struct {
-		Valid bool `json:"valid,omitempty"`
+		CleanBody string `json:"cleaned_body,omitempty"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -144,5 +145,21 @@ func handlerChirpValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, returnVals{Valid: true})
+	respondWithJSON(w, http.StatusOK, returnVals{CleanBody: replaceProfane(params.Body)})
+}
+
+func replaceProfane(msg string) string {
+	profaneWords := map[string]bool{"kerfuffle": true, "sharbert": true, "fornax": true}
+	words := strings.Split(msg, "")
+
+	for index, word := range words {
+		_, isProfance := profaneWords[strings.ToLower(word)]
+
+		if isProfance {
+			words[index] = "****"
+		}
+
+	}
+
+	return strings.Join(words, "")
 }
