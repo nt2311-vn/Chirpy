@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -21,6 +23,7 @@ type DB struct {
 }
 
 type Chirp struct {
+	Id   int    `json:"id"`
 	Body string `json:"body,omitempty"`
 }
 
@@ -176,4 +179,94 @@ func replaceProfane(msg string) string {
 	}
 
 	return strings.Join(words, " ")
+}
+
+func (db *DB) ensureDB() error {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+
+	if _, err := os.Stat(db.path); os.IsNotExist(err) {
+		return db.writeDB(DBStructure{Chirp: make(map[int]Chirp)})
+	}
+	return nil
+}
+
+func (db *DB) writeDB(dbStructure DBStructure) error {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+
+	bytes, err := json.Marshal(dbStructure)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(db.path, bytes, 0644)
+}
+
+func (db *DB) loadDB() (DBStructure, error) {
+	db.mux.Lock()
+	defer db.mux.RUnlock()
+
+	bytes, err := os.ReadFile(db.path)
+	if err != nil {
+		return DBStructure{}, err
+	}
+
+	var dbStructure DBStructure
+	err = json.Unmarshal(bytes, &dbStructure)
+
+	return dbStructure, err
+}
+
+func NewDB(path string) (*DB, error) {
+	db := &DB{path: path, mux: new(sync.RWMutex)}
+
+	initData := []Chirp{
+		{Id: 1, Body: "This is the first chirp ever!"},
+		{Id: 2, Body: "Hello, world!"},
+	}
+
+	data, err := json.Marshal(initData)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+
+func (db *DB) CreateChirp(body string) (Chirp, error) {
+	dbStruct, err := db.loadDB()
+	if err != nil {
+		return Chirp{}, err
+	}
+
+	newId := len(dbStruct.Chirp) + 1
+
+	chirp := Chirp{Id: newId, Body: body}
+	dbStruct.Chirp[newId] = chirp
+
+	err = db.writeDB(dbStruct)
+	return chirp, err
+}
+
+func (db *DB) GetChirps() ([]Chirp, error) {
+	dbStruct, err := db.loadDB()
+	if err != nil {
+		return nil, err
+	}
+
+	chirps := make([]Chirp, 0, len(dbStruct.Chirp))
+
+	for _, chirp := range chirps {
+		chirps = append(chirps, chirp)
+	}
+
+	sort.Slice(chirps, func(i, j int) bool {
+		return chirps[i].Id < chirps[j].Id
+	})
+
+	return chirps, nil
 }
