@@ -115,7 +115,10 @@ func (db *DB) CreateUser(email string) (User, error) {
 }
 
 func (db *DB) createDB() error {
-	dbStruct := DBStructure{Chirps: map[int]Chirp{}}
+	dbStruct := DBStructure{
+		Chirps: map[int]Chirp{},
+		Users:  map[int]User{},
+	}
 
 	return db.writeDB(dbStruct)
 }
