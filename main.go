@@ -74,6 +74,9 @@ func (db *DB) GetChirps() ([]Chirp, error) {
 	return chirps, nil
 }
 
+func (db *DB) GetChirpId(id int) {
+}
+
 func (db *DB) createDB() error {
 	dbStruct := DBStructure{Chirps: map[int]Chirp{}}
 
