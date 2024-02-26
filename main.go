@@ -30,8 +30,14 @@ type Chirp struct {
 	Id   int    `json:"id"`
 }
 
+type User struct {
+	Email string `json:"email,omitempty"`
+	Id    int    `json:"id"`
+}
+
 type DBStructure struct {
 	Chirps map[int]Chirp `json:"chirps"`
+	Users  map[int]User  `json:"users"`
 }
 
 func NewDB(path string) (*DB, error) {
@@ -88,6 +94,24 @@ func (db *DB) GetChirpId(id int) (Chirp, error) {
 	}
 
 	return chirp, nil
+}
+
+func (db *DB) CreateUser(email string) (User, error) {
+	dbStruct, err := db.loadDB()
+	if err != nil {
+		return User{}, err
+	}
+
+	newId := len(dbStruct.Users) + 1
+	user := User{Id: newId, Email: email}
+	dbStruct.Users[newId] = user
+
+	err = db.writeDB(dbStruct)
+	if err != nil {
+		return User{}, err
+	}
+
+	return user, nil
 }
 
 func (db *DB) createDB() error {
@@ -164,9 +188,13 @@ func main() {
 	apiRouter := chi.NewRouter()
 	apiRouter.Get("/healthz", handlerReadiness)
 	apiRouter.Get("/reset", apiConfg.handlerReset)
+
 	apiRouter.Post("/chirps", apiConfg.handlerChirpsCreate)
 	apiRouter.Get("/chirps", apiConfg.handlerChirpsRetrieve)
 	apiRouter.Get("/chirps/{chirpId}", apiConfg.handlerChirpGet)
+
+	apiRouter.Post("/users", apiConfg.handlerUserCreate)
+
 	router.Mount("/api", apiRouter)
 
 	adminRouter := chi.NewRouter()
@@ -381,4 +409,27 @@ func (cfg *apiConfig) handlerChirpGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondWithJSON(w, http.StatusOK, chirp)
+}
+
+func (cfg *apiConfig) handlerUserCreate(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email string `json:"email,omitempty"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode the post request")
+		return
+	}
+
+	user, err := cfg.DB.CreateUser(params.Email)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Coudn't create user")
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, User{Id: user.Id, Email: user.Email})
 }
