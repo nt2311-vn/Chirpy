@@ -25,8 +25,8 @@ type DB struct {
 }
 
 type Chirp struct {
-	Id   int    `json:"id"`
 	Body string `json:"body,omitempty"`
+	Id   int    `json:"id"`
 }
 
 type DBStructure struct {
@@ -67,7 +67,7 @@ func (db *DB) GetChirps() ([]Chirp, error) {
 
 	chirps := make([]Chirp, 0, len(dbStruct.Chirps))
 
-	for _, chirp := range chirps {
+	for _, chirp := range dbStruct.Chirps {
 		chirps = append(chirps, chirp)
 	}
 
