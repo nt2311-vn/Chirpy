@@ -6,12 +6,26 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 )
 
 type apiConfig struct {
 	fileserverHits int
+}
+
+type DB struct {
+	path string
+	mux  *sync.RWMutex
+}
+
+type Chirp struct {
+	Body string `json:"body,omitempty"`
+}
+
+type DBStructure struct {
+	Chirp map[int]Chirp `json:"chirps"`
 }
 
 func main() {
