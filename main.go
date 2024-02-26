@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -74,7 +75,19 @@ func (db *DB) GetChirps() ([]Chirp, error) {
 	return chirps, nil
 }
 
-func (db *DB) GetChirpId(id int) {
+func (db *DB) GetChirpId(id int) (Chirp, error) {
+	dbStruct, err := db.loadDB()
+	if err != nil {
+		return Chirp{}, err
+	}
+
+	chirp, ok := dbStruct.Chirps[id]
+
+	if !ok {
+		return Chirp{}, os.ErrNotExist
+	}
+
+	return chirp, nil
 }
 
 func (db *DB) createDB() error {
@@ -153,6 +166,7 @@ func main() {
 	apiRouter.Get("/reset", apiConfg.handlerReset)
 	apiRouter.Post("/chirps", apiConfg.handlerChirpsCreate)
 	apiRouter.Get("/chirps", apiConfg.handlerChirpsRetrieve)
+	apiRouter.Get("/chirps/{chirpId}", apiConfg.handlerChirpGet)
 	router.Mount("/api", apiRouter)
 
 	adminRouter := chi.NewRouter()
@@ -345,4 +359,26 @@ func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Reque
 	})
 
 	respondWithJSON(w, http.StatusOK, chirps)
+}
+
+func (cfg *apiConfig) handlerChirpGet(w http.ResponseWriter, r *http.Request) {
+	chirpIdStr := chi.URLParam(r, "chirpId")
+
+	chirpID, err := strconv.Atoi(chirpIdStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid chrip ID")
+		return
+	}
+
+	chirp, err := cfg.DB.GetChirpId(chirpID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			respondWithError(w, http.StatusNotFound, "Chirp not found")
+		} else {
+			respondWithError(w, http.StatusInternalServerError, "Error retrieving chirp")
+		}
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, chirp)
 }
