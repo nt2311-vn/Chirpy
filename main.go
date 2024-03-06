@@ -128,6 +128,8 @@ func (db *DB) CreateUser(email, password string) (User, error) {
 		return User{}, err
 	}
 
+	fmt.Printf("User created with info: %v\n", user)
+
 	return user, nil
 }
 
@@ -500,7 +502,9 @@ func (cfg *apiConfig) handlerUserLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok := bcrypt.CompareHashAndPassword([]byte(user.Email), []byte(params.Password))
+	fmt.Printf("Check hash bcrypt %v and %v\n", user.Password, params.Password)
+
+	ok := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(params.Password))
 
 	if ok != nil {
 		respondWithError(w, http.StatusUnauthorized, "Invalid password")
