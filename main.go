@@ -256,7 +256,7 @@ func main() {
 	apiRouter.Get("/chirps/{chirpId}", apiConfg.handlerChirpGet)
 
 	apiRouter.Post("/users", apiConfg.handlerUserCreate)
-	apiRouter.Put("/login", apiConfg.handlerUpdateUser)
+	apiRouter.Put("/users", apiConfg.handlerUpdateUser)
 	apiRouter.Post("/login", apiConfg.handlerUserLogin)
 
 	router.Mount("/api", apiRouter)
@@ -615,7 +615,7 @@ func (cfg *apiConfig) handlerUserLogin(w http.ResponseWriter, r *http.Request) {
 
 	token, err := MakeJWT(user.Id, cfg.jwtSecret, time.Duration(params.Expires)*time.Second)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't create token")
+		respondWithError(w, http.StatusUnauthorized, "Couldn't create token")
 	}
 
 	respondWithJSON(
