@@ -229,6 +229,7 @@ func main() {
 	apiRouter.Get("/chirps/{chirpId}", apiConfg.handlerChirpGet)
 
 	apiRouter.Post("/users", apiConfg.handlerUserCreate)
+	apiRouter.Put("/login", apiConfig.handerJWTLogin)
 	apiRouter.Post("/login", apiConfg.handlerUserLogin)
 
 	router.Mount("/api", apiRouter)
@@ -451,8 +452,8 @@ func (cfg *apiConfig) handlerChirpGet(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) handlerUserCreate(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Password string `json:"password,omitempty"`
-		Email    string `json:"email,omitempty"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -477,8 +478,9 @@ func (cfg *apiConfig) handlerUserCreate(w http.ResponseWriter, r *http.Request) 
 
 func (cfg *apiConfig) handlerUserLogin(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Password string `json:"password,omitempty"`
-		Email    string `json:"email,omitempty"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
+		Expires  int    `json:"expires_in_seconds,omitempty"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
