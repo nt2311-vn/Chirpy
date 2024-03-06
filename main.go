@@ -11,14 +11,18 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v4"
+	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type apiConfig struct {
 	fileserverHits int
 	DB             *DB
+	jwtSecret      string
 }
 
 type DB struct {
@@ -131,6 +135,9 @@ func (db *DB) CreateUser(email, password string) (User, error) {
 	return user, nil
 }
 
+func (db *DB) UpdateUser(id int, email, password string) (User, error) {
+}
+
 func (db *DB) GetUser(email string) (User, error) {
 	dbStruct, err := db.loadDB()
 	if err != nil {
@@ -204,13 +211,16 @@ func (db *DB) writeDB(dbStructure DBStructure) error {
 func main() {
 	const rootPath = "."
 	const port = "8080"
+	godotenv.Load()
+
+	jwtSecret := os.Getenv("JWT_SECRET")
 
 	db, err := NewDB("./database.json")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	apiConfg := apiConfig{fileserverHits: 0, DB: db}
+	apiConfg := apiConfig{fileserverHits: 0, DB: db, jwtSecret: jwtSecret}
 	router := chi.NewRouter()
 
 	fsHandler := apiConfg.middlewareMetricsInc(
@@ -229,7 +239,7 @@ func main() {
 	apiRouter.Get("/chirps/{chirpId}", apiConfg.handlerChirpGet)
 
 	apiRouter.Post("/users", apiConfg.handlerUserCreate)
-	apiRouter.Put("/login", apiConfig.handerJWTLogin)
+	apiRouter.Put("/login", apiConfg.handlerUpdateUser)
 	apiRouter.Post("/login", apiConfg.handlerUserLogin)
 
 	router.Mount("/api", apiRouter)
@@ -247,9 +257,9 @@ func main() {
 
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Cannot start the server: %v", err)
+	} else {
+		fmt.Println("chirpy is running on port " + port)
 	}
-
-	fmt.Println("chirpy is running on port " + port)
 }
 
 func middlewareCors(next http.Handler) http.Handler {
@@ -375,6 +385,59 @@ func replaceProfane(msg string) string {
 	}
 
 	return strings.Join(words, " ")
+}
+
+func HashPassword(password string) (string, error) {
+	hashPass, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hashPass), nil
+}
+
+func CheckPassword(password, hashStr string) error {
+	return bcrypt.CompareHashAndPassword([]byte(hashStr), []byte(password))
+}
+
+func MakeJWT(userID int, tokenSecret string, expiresIn time.Duration) (string, error) {
+	signingKey := []byte(tokenSecret)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+		Issuer:    "chirpy",
+		IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(expiresIn)),
+		Subject:   fmt.Sprintf("%d", userID),
+	})
+
+	return token.SignedString(signingKey)
+}
+
+func ValidateJWT(tokenString, tokenSecret string) (string, error) {
+	claimStruct := jwt.RegisteredClaims{}
+
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		&claimStruct,
+		func(token *jwt.Token) (interface{}, error) { return []byte(tokenSecret), nil },
+	)
+	if err != nil {
+		return "", err
+	}
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+	authHeader := headers.Get("Authorization")
+
+	if authHeader == "" {
+		return "", errors.New("No Authorization header")
+	}
+
+	splitAuth := strings.Split(authHeader, " ")
+
+	if len(splitAuth) < 2 || splitAuth[0] != "Bearer" {
+		return "", errors.New("Invalid Authorization header")
+	}
+
+	return splitAuth[1], nil
 }
 
 func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request) {
@@ -507,9 +570,41 @@ func (cfg *apiConfig) handlerUserLogin(w http.ResponseWriter, r *http.Request) {
 	ok := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(params.Password))
 
 	if ok != nil {
-		respondWithError(w, http.StatusUnauthorized, "Invalid password")
+		respondWithError(w, http.StatusUnauthorized, "Password incorrect")
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, User{Id: user.Id, Email: user.Email})
+	expiresIn := params.Expires
+
+	if expiresIn <= 0 || expiresIn > 86400 {
+		expiresIn = 86400
+	}
+
+	claims := &jwt.RegisteredClaims{
+		Issuer:    "chirpy",
+		Subject:   strconv.Itoa(user.Id),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Second * time.Duration(expiresIn))),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	tokenString, err := token.SignedString([]byte(cfg.jwtSecret))
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't sign the token")
+		return
+	}
+
+	respondWithJSON(
+		w,
+		http.StatusOK,
+		map[string]interface{}{"id": user.Id, "email": user.Email, "token": tokenString},
+	)
+}
+
+func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) {
+	type userUpdate struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
 }
