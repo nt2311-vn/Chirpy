@@ -128,8 +128,6 @@ func (db *DB) CreateUser(email, password string) (User, error) {
 		return User{}, err
 	}
 
-	fmt.Printf("User created with info: %v\n", user)
-
 	return user, nil
 }
 
@@ -249,6 +247,8 @@ func main() {
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Cannot start the server: %v", err)
 	}
+
+	fmt.Println("chirpy is running on port " + port)
 }
 
 func middlewareCors(next http.Handler) http.Handler {
@@ -501,8 +501,6 @@ func (cfg *apiConfig) handlerUserLogin(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusNotFound, "User not found")
 		return
 	}
-
-	fmt.Printf("Check hash bcrypt %v and %v\n", user.Password, params.Password)
 
 	ok := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(params.Password))
 
