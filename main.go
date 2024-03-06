@@ -107,7 +107,7 @@ func (db *DB) CreateUser(email, password string) (User, error) {
 	user, err := db.GetUser(email)
 
 	if err == nil {
-		return User{}, errors.New("User already exists")
+		return user, nil
 	}
 
 	hashPass, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
