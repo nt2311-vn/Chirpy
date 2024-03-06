@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type apiConfig struct {
@@ -31,8 +32,9 @@ type Chirp struct {
 }
 
 type User struct {
-	Email string `json:"email,omitempty"`
-	Id    int    `json:"id"`
+	Email    string `json:"email,omitempty"`
+	Password string `json:"password,omitempty"`
+	Id       int    `json:"id"`
 }
 
 type DBStructure struct {
@@ -96,14 +98,29 @@ func (db *DB) GetChirpId(id int) (Chirp, error) {
 	return chirp, nil
 }
 
-func (db *DB) CreateUser(email string) (User, error) {
+func (db *DB) CreateUser(email, password string) (User, error) {
 	dbStruct, err := db.loadDB()
 	if err != nil {
 		return User{}, err
 	}
 
+	user, err := db.GetUser(email)
+
+	if err == nil {
+		return User{}, errors.New("User already exists")
+	}
+
+	hashPass, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, err
+	}
+
 	newId := len(dbStruct.Users) + 1
-	user := User{Id: newId, Email: email}
+	user = User{
+		Id:       newId,
+		Email:    email,
+		Password: string(hashPass),
+	}
 	dbStruct.Users[newId] = user
 
 	err = db.writeDB(dbStruct)
@@ -112,6 +129,21 @@ func (db *DB) CreateUser(email string) (User, error) {
 	}
 
 	return user, nil
+}
+
+func (db *DB) GetUser(email string) (User, error) {
+	dbStruct, err := db.loadDB()
+	if err != nil {
+		return User{}, err
+	}
+
+	for _, user := range dbStruct.Users {
+		if user.Email == email {
+			return user, nil
+		}
+	}
+
+	return User{}, os.ErrNotExist
 }
 
 func (db *DB) createDB() error {
@@ -197,6 +229,7 @@ func main() {
 	apiRouter.Get("/chirps/{chirpId}", apiConfg.handlerChirpGet)
 
 	apiRouter.Post("/users", apiConfg.handlerUserCreate)
+	apiRouter.Post("/login", apiConfg.handlerUserLogin)
 
 	router.Mount("/api", apiRouter)
 
@@ -416,10 +449,13 @@ func (cfg *apiConfig) handlerChirpGet(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) handlerUserCreate(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email string `json:"email,omitempty"`
+		Password string `json:"password,omitempty"`
+		Email    string `json:"email,omitempty"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+
 	params := parameters{}
 
 	err := decoder.Decode(&params)
@@ -428,11 +464,48 @@ func (cfg *apiConfig) handlerUserCreate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	user, err := cfg.DB.CreateUser(params.Email)
+	user, err := cfg.DB.CreateUser(params.Email, params.Password)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Coudn't create user")
 		return
 	}
 
 	respondWithJSON(w, http.StatusCreated, User{Id: user.Id, Email: user.Email})
+}
+
+func (cfg *apiConfig) handlerUserLogin(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Password string `json:"password,omitempty"`
+		Email    string `json:"email,omitempty"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+
+	params := parameters{}
+
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(
+			w,
+			http.StatusInternalServerError,
+			"Couldn't decode the post login request",
+		)
+		return
+	}
+
+	user, err := cfg.DB.GetUser(params.Email)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "User not found")
+		return
+	}
+
+	ok := bcrypt.CompareHashAndPassword([]byte(user.Email), []byte(params.Password))
+
+	if ok != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid password")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, User{Id: user.Id, Email: user.Email})
 }
