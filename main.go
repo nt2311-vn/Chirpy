@@ -46,6 +46,13 @@ type DBStructure struct {
 	Users  map[int]User  `json:"users"`
 }
 
+type TokenType string
+
+const (
+	TokenTypeAccess  TokenType = "chirpy-access"
+	TokenTypeRefresh TokenType = "chirpy-refresh"
+)
+
 func NewDB(path string) (*DB, error) {
 	db := &DB{path: path, mu: &sync.RWMutex{}}
 	err := db.ensureDB()
@@ -577,7 +584,8 @@ func (cfg *apiConfig) handlerUserLogin(w http.ResponseWriter, r *http.Request) {
 
 	type response struct {
 		User
-		Token string `json:"token"`
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -606,22 +614,24 @@ func (cfg *apiConfig) handlerUserLogin(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusUnauthorized, "Invalid password")
 	}
 
-	defaultExpiration := 60 * 60 * 24
-	if params.Expires == 0 {
-		params.Expires = defaultExpiration
-	} else if params.Expires > defaultExpiration {
-		params.Expires = defaultExpiration
+	acessToken, err := MakeJWT(user.Id, cfg.jwtSecret, time.Hour)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't create access token")
 	}
 
-	token, err := MakeJWT(user.Id, cfg.jwtSecret, time.Duration(params.Expires)*time.Second)
+	refreshToken, err := MakeJWT(user.Id, cfg.jwtSecret, time.Hour*30*24)
 	if err != nil {
-		respondWithError(w, http.StatusUnauthorized, "Couldn't create token")
+		respondWithError(w, http.StatusUnauthorized, "Could not create refresh token")
 	}
 
 	respondWithJSON(
 		w,
 		http.StatusOK,
-		response{User: User{Id: user.Id, Email: user.Email}, Token: token},
+		response{
+			User:         User{Id: user.Id, Email: user.Email},
+			Token:        acessToken,
+			RefreshToken: refreshToken,
+		},
 	)
 }
 
