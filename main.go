@@ -42,8 +42,9 @@ type User struct {
 }
 
 type DBStructure struct {
-	Chirps map[int]Chirp `json:"chirps"`
-	Users  map[int]User  `json:"users"`
+	Chirps     map[int]Chirp         `json:"chirps"`
+	Users      map[int]User          `json:"users"`
+	Revocation map[string]Revocation `json:"revocation"`
 }
 
 type TokenType string
@@ -52,6 +53,11 @@ const (
 	TokenTypeAccess  TokenType = "chirpy-access"
 	TokenTypeRefresh TokenType = "chirpy-refresh"
 )
+
+type Revocation struct {
+	Token     string    `json:"token"`
+	RevokedAt time.Time `json:"revoked_at"`
+}
 
 func NewDB(path string) (*DB, error) {
 	db := &DB{path: path, mu: &sync.RWMutex{}}
@@ -177,6 +183,46 @@ func (db *DB) GetUser(email string) (User, error) {
 	return User{}, os.ErrNotExist
 }
 
+func (db *DB) RevokeToken(token string) error {
+	dbStruct, err := db.loadDB()
+	if err != nil {
+		return err
+	}
+
+	revocation := Revocation{
+		Token:     token,
+		RevokedAt: time.Now().UTC(),
+	}
+
+	dbStruct.Revocation[token] = revocation
+
+	err = db.writeDB(dbStruct)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (db *DB) IsTokenRevoked(token string) (bool, error) {
+	dbStruct, err := db.loadDB()
+	if err != nil {
+		return false, err
+	}
+
+	revocation, ok := dbStruct.Revocation[token]
+
+	if !ok {
+		return false, nil
+	}
+
+	if revocation.RevokedAt.IsZero() {
+		return false, nil
+	}
+
+	return true, nil
+}
+
 func (db *DB) createDB() error {
 	dbStruct := DBStructure{
 		Chirps: map[int]Chirp{},
@@ -264,7 +310,10 @@ func main() {
 
 	apiRouter.Post("/users", apiConfg.handlerUserCreate)
 	apiRouter.Put("/users", apiConfg.handlerUpdateUser)
+
 	apiRouter.Post("/login", apiConfg.handlerUserLogin)
+	apiRouter.Post("/revoke", apiConfg.hanlderRevoke)
+	apiRouter.Post("/refresh", apiConfg.handlerRefresh)
 
 	router.Mount("/api", apiRouter)
 
@@ -423,10 +472,15 @@ func CheckPassword(password, hashStr string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hashStr), []byte(password))
 }
 
-func MakeJWT(userID int, tokenSecret string, expiresIn time.Duration) (string, error) {
+func MakeJWT(
+	userID int,
+	tokenSecret string,
+	expiresIn time.Duration,
+	tokenType TokenType,
+) (string, error) {
 	signingKey := []byte(tokenSecret)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-		Issuer:    "chirpy",
+		Issuer:    string(tokenType),
 		IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
 		ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(expiresIn)),
 		Subject:   fmt.Sprintf("%d", userID),
@@ -452,6 +506,30 @@ func ValidateJWT(tokenString, tokenSecret string) (string, error) {
 	}
 
 	return claimStruct.Subject, nil
+}
+
+func RefreshToken(tokenString, tokenSecret string) (string, error) {
+	claimStruct := &jwt.RegisteredClaims{}
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		claimStruct,
+		func(t *jwt.Token) (interface{}, error) { return []byte(tokenSecret), nil },
+	)
+	if err != nil {
+		return "", err
+	}
+
+	if !token.Valid {
+	}
+
+	userID, _ := strconv.Atoi(claimStruct.Subject)
+
+	newToken, err := MakeJWT(userID, tokenSecret, time.Hour, TokenTypeAccess)
+	if err != nil {
+		return "", err
+	}
+
+	return newToken, nil
 }
 
 func GetBearerToken(headers http.Header) (string, error) {
@@ -614,12 +692,12 @@ func (cfg *apiConfig) handlerUserLogin(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusUnauthorized, "Invalid password")
 	}
 
-	acessToken, err := MakeJWT(user.Id, cfg.jwtSecret, time.Hour)
+	acessToken, err := MakeJWT(user.Id, cfg.jwtSecret, time.Hour, TokenTypeAccess)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Couldn't create access token")
 	}
 
-	refreshToken, err := MakeJWT(user.Id, cfg.jwtSecret, time.Hour*30*24)
+	refreshToken, err := MakeJWT(user.Id, cfg.jwtSecret, time.Hour*30*24, TokenTypeRefresh)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Could not create refresh token")
 	}
@@ -687,4 +765,50 @@ func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) 
 	respondWithJSON(w, http.StatusOK, response{
 		User: User{Id: user.Id, Email: user.Email},
 	})
+}
+
+func (cfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
+	type response struct {
+		Token string `json:"token"`
+	}
+
+	refreshToken, err := GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Couldn't find JWT")
+	}
+
+	isRevoked, err := cfg.DB.IsTokenRevoked(refreshToken)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't check if token was revoked")
+		return
+	}
+
+	if isRevoked {
+		respondWithError(w, http.StatusUnauthorized, "Token has been revoked")
+		return
+	}
+
+	accessToken, err := RefreshToken(refreshToken, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, response{Token: accessToken})
+}
+
+func (cfg *apiConfig) hanlderRevoke(w http.ResponseWriter, r *http.Request) {
+	refreshToken, err := GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Couldn't find JWT")
+		return
+	}
+
+	err = cfg.DB.RevokeToken(refreshToken)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't revoke session")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, struct{}{})
 }
