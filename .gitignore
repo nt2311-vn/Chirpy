@@ -2,3 +2,4 @@
 /server
 /database.json
 .env
+./Chirpy.exe
