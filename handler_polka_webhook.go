@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"strings"
 )
 
 func (cfg *apiConfig) handlerPolkaWebhooks(w http.ResponseWriter, r *http.Request) {
@@ -11,6 +13,22 @@ func (cfg *apiConfig) handlerPolkaWebhooks(w http.ResponseWriter, r *http.Reques
 		Data  struct {
 			UserID int `json:"user_id"`
 		} `json:"data"`
+	}
+
+	authHeader := r.Header.Get("Authorization")
+
+	if authHeader == "" {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized webhook")
+		return
+	}
+
+	splitAuth := strings.Split(authHeader, " ")
+
+	polka_token := os.Getenv("POLKA_KEY")
+
+	if len(splitAuth) < 2 || splitAuth[1] != polka_token {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized webhook")
+		return
 	}
 
 	decoder := json.NewDecoder(r.Body)
